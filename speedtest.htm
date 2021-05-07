@@ -1,0 +1,185 @@
+<html>
+<head>
+<meta name="viewport" content="width=device-width; initial-scale=1;" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<style>
+body
+{
+    font-size: 20pt;
+}
+table
+{
+    font-size: 20pt;
+}
+input
+{
+    font-size: 15pt;
+}
+</style>
+</head>
+<body>
+
+<table>
+<tr><td>Download:</td><td><span id="downspeed"></span> Mbps</td></tr>
+<tr><td>Upload:</td><td><span id="upspeed"></span> Mbps</td></tr>
+</table>
+<span id="msg"></span><br />
+
+<input type=button id="btndown" value="Test Download" onclick="test_down()" />
+<input type=button id="btnup" value="Test Upload" onclick="test_up()" />
+
+<script>
+
+var threads = 5;
+var down_bytes = 0;
+var down_timer = null;
+var down_websockets = new Array(threads);
+var down_testing = 0;
+
+var up_send_interval = 50;
+var up_send_bytes_once = 4 * 1024 * 1024;
+var up_send_max_cached = 10 * 1024 * 1024;
+var up_stat_timer = null;
+var up_send_timer = null;
+var up_websockets = new Array(threads);
+var up_testing = 0;
+
+function $(id)
+{
+	return document.getElementById(id);
+}
+
+function down(i)
+{
+	var ws = new WebSocket("ws://" + window.location.host + "/down");
+	down_websockets[i] = ws;
+
+	ws.onerror = function(evt) {
+		$("msg").innerHTML = "down websocket error";
+	}
+
+	ws.onopen = function(evt) { 
+	};
+
+	ws.onmessage = function(evt) {
+		down_bytes += (evt.data.size + 10)/1460*1514;
+	};
+
+	ws.onclose = function(evt) {
+        if (down_testing)
+            down(i);
+	}; 
+}
+
+function stop_down()
+{
+	down_bytes = 0;
+    down_testing = 0;
+	if (down_timer != null) {
+		clearInterval(down_timer);
+		down_timer = null;
+	}
+	for (var i = 0; i < threads; i++) {
+		if (down_websockets[i] != null) {
+			down_websockets[i].close();
+			down_websockets[i] = null;
+		}
+	}
+	$("downspeed").innerHTML = "";
+	$("btndown").value = "Test Download";
+	$("btndown").onclick = test_down;
+}
+
+function test_down()
+{
+	stop_down();
+    down_testing = 1;
+	for (var i = 0; i < threads; i++)
+		down(i);
+	down_timer = setInterval( function() { 
+				$("downspeed").innerHTML = (down_bytes / 1000 / 1000 * 8).toFixed(2);
+				down_bytes = 0;
+			}, 1000);
+	$("btndown").value = "Stop Download";
+	$("btndown").onclick = stop_down;
+}
+
+function up(i)
+{
+	var ws = new WebSocket("ws://" + window.location.host + "/up");
+    ws.binaryType = "arraybuffer";
+    ws.total = 0;
+	up_websockets[i] = ws;
+	ws.onerror = function(evt) {
+		$("msg").innerHTML = "up websocket error";
+	}
+	ws.onopen = function(evt) {
+	};
+	ws.onmessage = function(evt) {
+	};
+	ws.onclose = function(evt) {
+        if (up_testing)
+            up(i);
+	};   
+}
+
+function stop_up()
+{
+    up_testing = 0;
+	if (up_stat_timer != null) {
+		clearInterval(up_stat_timer);
+		up_stat_timer = null;
+	}
+	if (up_send_timer != null) {
+		clearInterval(up_send_timer);
+		up_send_timer = null;
+	}
+	for (var i = 0; i < threads; i++) {
+		if (up_websockets[i] != null) {
+			up_websockets[i].close();
+			up_websockets[i] = null;
+		}
+	}
+	$("upspeed").innerHTML = "";
+	$("btnup").value = "Test Upload";
+	$("btnup").onclick = test_up;
+}
+
+function test_up()
+{
+	stop_up();
+    up_testing = 1;
+
+    var bytearray = new Uint32Array(up_send_bytes_once / 4);
+    for ( var i = 0; i < up_send_bytes_once / 4; ++i ) {
+        bytearray[i] = 0;
+    }
+
+	for (var i = 0; i < threads; i++)
+		up(i);
+
+	up_stat_timer = setInterval( function() { 
+        bytes = 0;
+        for (var i = 0; i < threads; i++) {
+            bytes += up_websockets[i].total - up_websockets[i].bufferedAmount;
+            up_websockets[i].total = up_websockets[i].bufferedAmount
+        }
+		$("upspeed").innerHTML = (bytes / 1000 / 1000 * 8).toFixed(2);
+	}, 1000);
+
+	up_send_timer = setInterval( function() { 
+        for (var i = 0; i < threads; i++) {
+            if (up_websockets[i].bufferedAmount >= up_send_max_cached)
+                continue;
+            up_websockets[i].send(bytearray.buffer);
+            up_websockets[i].total += bytearray.byteLength;
+        }
+	}, up_send_interval);
+
+	$("btnup").value = "Stop Upload";
+	$("btnup").onclick = stop_up;
+}
+
+</script>
+</body>
+</html>
