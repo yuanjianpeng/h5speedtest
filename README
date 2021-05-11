@@ -1,0 +1,9 @@
+1. build xhttpd
+$ make
+
+2. run xhttpd
+$ sudo ./xhttpd
+
+3 open test webpage
+http://ip/speedtest.htm
+
